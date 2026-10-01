@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#000000"/>
+  <!-- DX en Arial Black -->
+  <text x="256" y="300"
+        font-family="'Arial Black', Arial, sans-serif"
+        font-size="225" font-weight="900"
+        fill="#FFFFFF" text-anchor="middle">DX</text>
+  <!-- NOVA en Bauhaus 93 -->
+  <text x="256" y="352"
+        font-family="'Bauhaus 93', 'Century Gothic', sans-serif"
+        font-size="66"
+        fill="#FFFFFF" text-anchor="middle"
+        letter-spacing="10">NOVA</text>
+</svg>
