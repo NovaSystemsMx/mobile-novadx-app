@@ -108,8 +108,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (!XVideoResolver.looksLikeXUrl(text)) return;
     if (text == _lastResolvedUrl) return;
     if (_status == DownloadStatus.resolving ||
-        _status == DownloadStatus.downloading ||
-        _status == DownloadStatus.preview) {
+        _status == DownloadStatus.downloading) {
       return;
     }
     _debounce = Timer(const Duration(milliseconds: 700), () {
@@ -126,6 +125,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       if (text.isEmpty) return;
       _controller.text = text;
       _focusNode.requestFocus();
+      // Arranque inmediato: no depender del debounce del listener,
+      // que podia no dispararse tras limpiar y pegar.
+      await _start();
     } catch (_) {
       // Sin acceso al portapapeles.
     }
@@ -147,12 +149,22 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     if (!XVideoResolver.looksLikeXUrl(input)) {
       setState(() {
+        _status = DownloadStatus.resolving;
+        _progress = null;
+        _message = '';
+        _preview = null;
+      });
+      // Pequeña espera para que se alcance a ver el "Buscando...".
+      await Future.delayed(const Duration(seconds: 2));
+      if (!mounted) return;
+      setState(() {
         _status = DownloadStatus.error;
         _message = 'Ese enlace no es de X.';
       });
       return;
     }
 
+    final stopwatch = Stopwatch()..start();
     setState(() {
       _status = DownloadStatus.resolving;
       _progress = null;
@@ -177,18 +189,29 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _lastResolvedUrl = input;
       });
     } on XResolverException catch (e) {
+      await _quedarBienDelay(stopwatch);
       if (!mounted) return;
       setState(() {
         _status = DownloadStatus.error;
         _message = e.message;
       });
     } catch (_) {
+      await _quedarBienDelay(stopwatch);
       if (!mounted) return;
       setState(() {
         _status = DownloadStatus.error;
         _message = 'Sin conexion. Intentalo de nuevo.';
       });
     }
+  }
+
+  /// Garantiza minimo 2s de "Buscando..." antes de mostrar un error,
+  /// para que no parezca que ni lo intento. Si la red ya tardo mas,
+  /// no agrega espera extra.
+  Future<void> _quedarBienDelay(Stopwatch sw) async {
+    const min = Duration(seconds: 2);
+    final elapsed = sw.elapsed;
+    if (elapsed < min) await Future.delayed(min - elapsed);
   }
 
   /// Descarga el video ya localizado.
@@ -354,8 +377,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     onSubmit: _start,
                     onPaste: _paste,
                     onClear: () {
+                      _cancelPreview();
                       _controller.clear();
-                      _lastResolvedUrl = '';
                       _focusNode.requestFocus();
                     },
                   ),

@@ -24,11 +24,15 @@
 
 ## Descripción general
 
-NovaDX (`downloader_x`, v`0.1.0+1`) resuelve el MP4 directo de un post de X sin API keys y lo descarga en segundo plano aunque salgas de la app.
+NovaDX (`downloader_x`, v`0.2.0+2`) resuelve el MP4 directo de un post de X sin API keys y lo descarga en segundo plano aunque salgas de la app.
 
 Capacidades verificadas en código:
 
 - *Auto-resolve con debounce 700 ms*: al detectar `x.com/.../status/<id>` o `twitter.com/.../status/<id>` inicia la búsqueda sin pulsar nada (`lib/screens/home_screen.dart`).
+- *Pegar dispara búsqueda inmediata*: el botón Pegar llama a `_start()` directo tras poner el texto, sin depender del debounce ni pulsar Enter.
+- *Limpiar resetea la card*: la tachita llama a `_cancelPreview()` (estado `idle`, preview en `null`), así el siguiente link siempre busca de cero.
+- *Error con mínimo 2 s de "Buscando..."*: `_quedarBienDelay()` garantiza 2 s de spinner antes de mostrar el error (sin espera extra si la red ya tardó más).
+- *Barras del sistema en negro*: `SystemChrome.setSystemUIOverlayStyle` en `main.dart` (status + navigation en `AppColors.background`, iconos claros, `systemNavigationBarContrastEnforced: false`) para modo oscuro/HyperOS.
 - *Autofill desde portapapeles* y *texto compartido* desde X u otra app (`Intent.ACTION_SEND`, `getSharedText`).
 - *Mejor variante por bitrate*: filtra `content_type` con `mp4` y elige el mayor `bitrate`, con fallback a `video.url`.
 - *Descarga en segundo plano* con `DownloadManager` del sistema, notificación `VISIBILITY_VISIBLE_NOTIFY_COMPLETED`, destino `Movies/NovaDX/<x_<id>.mp4>`.
@@ -46,7 +50,7 @@ Capacidades verificadas en código:
 ```text
 mobile-novadx-app/
 ├── lib/
-│   ├── main.dart                 # MaterialApp 'NovaDX', theme oscuro, home: HomeScreen
+│   ├── main.dart                 # SystemUI negro + MaterialApp 'NovaDX', theme oscuro, home: HomeScreen
 │   ├── theme.dart                # Paleta terminal (AppColors), fuente mono, ThemeData dark
 │   ├── screens/
 │   │   └── home_screen.dart      # Input link, debounce, estados idle/resolving/preview/downloading/done/error
@@ -161,9 +165,9 @@ keyPassword=*****
 ## Uso de la app
 
 1. Copia un link tipo `https://x.com/usuario/status/123...`.
-2. Abre NovaDX: si el portapapeles trae el link, se autorellena.
+2. Abre NovaDX: si el portapapeles trae el link, se autorellena. Con el botón Pegar la búsqueda arranca de inmediato, sin pulsar Enter.
 3. O comparte desde X con **Compartir → NovaDX**.
-4. Espera ~700 ms: aparece preview (`x_<id>.mp4` + peso estimado vía `HEAD` `content-length`).
+4. Espera a que aparezca el preview (`x_<id>.mp4` + peso estimado vía `HEAD` `content-length`). Si el link falla, verás ~2 s de "Buscando..." antes del error.
 5. Pulsa **Descargar**: Android muestra notificación del sistema con progreso.
 6. Al terminar: **Abrir** o **Compartir** desde la app o la notificación.
 
