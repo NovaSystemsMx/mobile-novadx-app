@@ -1,6 +1,8 @@
 import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 
+import 'twimg_url.dart';
+
 // Selecciona la implementacion correcta segun la plataforma en tiempo de
 // compilacion: en web usa la descarga del navegador, en nativo usa archivos.
 import 'saver_stub.dart'
@@ -28,7 +30,7 @@ class VideoDownloader {
     required String fileName,
     void Function(double? progress)? onProgress,
   }) async {
-    final request = http.Request('GET', Uri.parse(url));
+    final request = http.Request('GET', Uri.parse(TwimgUrl.clean(url)));
     request.headers['User-Agent'] = 'downloader_x/1.0';
 
     http.StreamedResponse response;

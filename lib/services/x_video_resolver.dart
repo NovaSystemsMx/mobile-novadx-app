@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 
+import 'twimg_url.dart';
+
 /// Resultado de resolver un tweet: la URL directa del mp4 y metadatos útiles.
 class ResolvedVideo {
   const ResolvedVideo({
@@ -143,7 +145,8 @@ class XVideoResolver {
     }
 
     return ResolvedVideo(
-      downloadUrl: bestUrl,
+      // El CDN de X devuelve 403 si el mp4 lleva el parametro `tag`.
+      downloadUrl: TwimgUrl.clean(bestUrl),
       thumbnailUrl: video['thumbnail_url'] as String?,
       width: (video['width'] as num?)?.toInt(),
       height: (video['height'] as num?)?.toInt(),
