@@ -1,6 +1,8 @@
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 
+import 'twimg_url.dart';
+
 class GalleryDownloadException implements Exception {
   GalleryDownloadException(this.message);
   final String message;
@@ -40,7 +42,7 @@ class GalleryDownloader {
     int? id;
     try {
       id = await _channel.invokeMethod<int>('enqueueDownload', {
-        'url': url,
+        'url': TwimgUrl.clean(url),
         'fileName': fileName,
       });
     } on PlatformException catch (e) {
@@ -103,7 +105,10 @@ class GalleryDownloader {
   static Future<String?> estimateSizeLabel(String url) async {
     try {
       final res = await http
-          .head(Uri.parse(url), headers: {'User-Agent': 'downloader_x/1.0'})
+          .head(
+            Uri.parse(TwimgUrl.clean(url)),
+            headers: {'User-Agent': 'downloader_x/1.0'},
+          )
           .timeout(const Duration(seconds: 8));
       final raw = res.headers['content-length'];
       final bytes = int.tryParse(raw ?? '');

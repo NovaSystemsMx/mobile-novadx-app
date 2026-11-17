@@ -19,6 +19,12 @@ class MainActivity : FlutterActivity() {
     private val channelName = "novadx/gallery"
     private var sharedText: String? = null
 
+    companion object {
+        private const val BROWSER_USER_AGENT =
+            "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 " +
+                "(KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         handleSendIntent(intent)
@@ -121,8 +127,12 @@ class MainActivity : FlutterActivity() {
             MediaScannerConnection.scanFile(this, arrayOf(existing.absolutePath), null, null)
         }
         val targetName = fileName
+        // Algunos CDN (incluido twimg) rechazan el User-Agent por defecto de
+        // DownloadManager. Enviamos uno de navegador movil y un Referer de X.
         val request =
             DownloadManager.Request(Uri.parse(url)).apply {
+                addRequestHeader("User-Agent", BROWSER_USER_AGENT)
+                addRequestHeader("Referer", "https://x.com/")
                 setTitle(targetName)
                 setDescription("Descargando con NovaDX")
                 setMimeType("video/mp4")

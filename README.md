@@ -24,7 +24,7 @@
 
 ## Descripción general
 
-NovaDX (`downloader_x`, v`0.2.0+2`) resuelve el MP4 directo de un post de X sin API keys y lo descarga en segundo plano aunque salgas de la app.
+NovaDX (`downloader_x`, v`0.2.1+3`) resuelve el MP4 directo de un post de X sin API keys y lo descarga en segundo plano aunque salgas de la app.
 
 Capacidades verificadas en código:
 
@@ -35,6 +35,7 @@ Capacidades verificadas en código:
 - *Barras del sistema en negro*: `SystemChrome.setSystemUIOverlayStyle` en `main.dart` (status + navigation en `AppColors.background`, iconos claros, `systemNavigationBarContrastEnforced: false`) para modo oscuro/HyperOS.
 - *Autofill desde portapapeles* y *texto compartido* desde X u otra app (`Intent.ACTION_SEND`, `getSharedText`).
 - *Mejor variante por bitrate*: filtra `content_type` con `mp4` y elige el mayor `bitrate`, con fallback a `video.url`.
+- *Limpieza del parametro `tag`*: X agrega `?tag=NN` a los mp4 y su CDN responde `403 Unauthorized` desde finales de 2025. `TwimgUrl.clean()` lo quita antes de descargar (`lib/services/twimg_url.dart`).
 - *Descarga en segundo plano* con `DownloadManager` del sistema, notificación `VISIBILITY_VISIBLE_NOTIFY_COMPLETED`, destino `Movies/NovaDX/<x_<id>.mp4>`.
 - *Acciones post-descarga*: abrir con visor, compartir vía `Intent`, cancelar, consultar progreso.
 - *UI estilo terminal*: fondo negro, monoespaciada, logo `NOVADX` con fuente `ArchivoBlack`.
@@ -56,6 +57,7 @@ mobile-novadx-app/
 │   │   └── home_screen.dart      # Input link, debounce, estados idle/resolving/preview/downloading/done/error
 │   ├── services/
 │   │   ├── x_video_resolver.dart # looksLikeXUrl(), resolve() vía https://api.fxtwitter.com/<path>
+│   │   ├── twimg_url.dart        # Quita ?tag= de los mp4 de video.twimg.com (evita 403)
 │   │   ├── video_downloader.dart # Descarga http con progreso (uso web/fallback), saveBytes por plataforma
 │   │   ├── gallery_downloader.dart # MethodChannel novadx/gallery: enqueue/query/cancel/open/share
 │   │   ├── saver_native.dart     # Temporal + MediaStore Movies/NovaDX (Android Q+) o dir externo
@@ -182,6 +184,7 @@ input link
   -> XVideoResolver.looksLikeXUrl()  // ^https?://(www.)?(twitter|x).com/.../status/\d+
   -> GET https://api.fxtwitter.com/<usuario>/status/<id>  (timeout 20s, UA: downloader_x/1.0)
   -> tweet.media.videos[0].variants  // filtra mp4, max bitrate
+  -> TwimgUrl.clean(url)             // quita ?tag=NN (si no, CDN responde 403)
   -> ResolvedVideo(downloadUrl, thumbnailUrl, width, height, bitrate)
   -> HEAD downloadUrl -> etiqueta "Aprox X.X MB"
   -> DownloadManager.enqueue -> Movies/NovaDX/x_<id>.mp4
@@ -271,7 +274,8 @@ python tool/apk_server.py
 ## Seguridad
 
 - Sin API keys en cliente; extractor público vía HTTPS.
-- `User-Agent: downloader_x/1.0` fijo en `GET` y `HEAD`.
+- `User-Agent: downloader_x/1.0` fijo en `GET` y `HEAD` de Dart; en `DownloadManager` se envía User-Agent de navegador móvil + `Referer: https://x.com/`.
+- Las URLs de descarga pasan por `TwimgUrl.clean()` (sin `tag`) tanto en el resolver como en los downloaders.
 - Firma: `storeFile`, `storePassword`, `keyAlias`, `keyPassword` solo en `android/key.properties` local.
 - Ignorados: `/build/`, `android/key.properties`, `**/*.jks`, `**/*.keystore`, `**/*.p12`, `**/*.pepk`, `app.*.symbols`, `app.*.map.json`.
 
@@ -281,6 +285,8 @@ python tool/apk_server.py
 
 - **No resuelve**: verifica formato `.../status/<solo-dígitos>`. Los links `x.com/i/status` o con query rara no matchean el regex.
 - **404 del extractor**: post eliminado/privado o `api.fxtwitter.com` caído; reintenta.
+- **La descarga falla con 403 / "Unauthorized"**: X empezó a rechazar los mp4 que llevan `?tag=NN`. La app ya los limpia con `TwimgUrl.clean()`; si vuelve a pasar, revisa que la URL final no incluya `tag`.
+- **El post no resuelve pero el enlace es válido**: `api.fxtwitter.com` puede rate-limitar; espera un momento o prueba otro post.
 - **APK no instala tras activar R8**: deja `isMinifyEnabled=false`, `isShrinkResources=false` (estado actual).
 - **`key.properties` ausente**: el build firma con `debug`; es intencional para pruebas locales.
 - **No aparece en galería (Android <10)**: requiere `MediaScannerConnection.scanFile` (ya implementado en `saveVideoToGallery` legacy).
