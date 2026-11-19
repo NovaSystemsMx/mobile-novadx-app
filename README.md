@@ -24,18 +24,19 @@
 
 ## Descripción general
 
-NovaDX (`downloader_x`, v`0.2.1+3`) resuelve el MP4 directo de un post de X sin API keys y lo descarga en segundo plano aunque salgas de la app.
+NovaDX (`downloader_x`, v`0.2.2+4`) resuelve el MP4 directo de un post de X sin API keys y lo descarga en segundo plano aunque salgas de la app.
 
 Capacidades verificadas en código:
 
 - *Auto-resolve con debounce 700 ms*: al detectar `x.com/.../status/<id>` o `twitter.com/.../status/<id>` inicia la búsqueda sin pulsar nada (`lib/screens/home_screen.dart`).
 - *Pegar dispara búsqueda inmediata*: el botón Pegar llama a `_start()` directo tras poner el texto, sin depender del debounce ni pulsar Enter.
+- *Limpieza de parámetros en URL pegada*: al pegar, autocompletar o compartir un enlace de X, se limpian todos los parámetros de consulta (`?p=`, `?s=`, etc.) y fragmentos para usar la URL canónica del post (`XVideoResolver.cleanUrl()`).
 - *Limpiar resetea la card*: la tachita llama a `_cancelPreview()` (estado `idle`, preview en `null`), así el siguiente link siempre busca de cero.
 - *Error con mínimo 2 s de "Buscando..."*: `_quedarBienDelay()` garantiza 2 s de spinner antes de mostrar el error (sin espera extra si la red ya tardó más).
 - *Barras del sistema en negro*: `SystemChrome.setSystemUIOverlayStyle` en `main.dart` (status + navigation en `AppColors.background`, iconos claros, `systemNavigationBarContrastEnforced: false`) para modo oscuro/HyperOS.
 - *Autofill desde portapapeles* y *texto compartido* desde X u otra app (`Intent.ACTION_SEND`, `getSharedText`).
 - *Mejor variante por bitrate*: filtra `content_type` con `mp4` y elige el mayor `bitrate`, con fallback a `video.url`.
-- *Limpieza del parametro `tag`*: X agrega `?tag=NN` a los mp4 y su CDN responde `403 Unauthorized` desde finales de 2025. `TwimgUrl.clean()` lo quita antes de descargar (`lib/services/twimg_url.dart`).
+- *Limpieza total de parámetros en descarga*: X y extractores agregan parámetros (`?tag=NN`, `?p=...`, etc.) a los mp4 y el CDN responde `403 Unauthorized` o rechaza la URL. `TwimgUrl.clean()` remueve todos los parámetros de consulta antes de descargar (`lib/services/twimg_url.dart`).
 - *Descarga en segundo plano* con `DownloadManager` del sistema, notificación `VISIBILITY_VISIBLE_NOTIFY_COMPLETED`, destino `Movies/NovaDX/<x_<id>.mp4>`.
 - *Acciones post-descarga*: abrir con visor, compartir vía `Intent`, cancelar, consultar progreso.
 - *UI estilo terminal*: fondo negro, monoespaciada, logo `NOVADX` con fuente `ArchivoBlack`.
@@ -184,7 +185,7 @@ input link
   -> XVideoResolver.looksLikeXUrl()  // ^https?://(www.)?(twitter|x).com/.../status/\d+
   -> GET https://api.fxtwitter.com/<usuario>/status/<id>  (timeout 20s, UA: downloader_x/1.0)
   -> tweet.media.videos[0].variants  // filtra mp4, max bitrate
-  -> TwimgUrl.clean(url)             // quita ?tag=NN (si no, CDN responde 403)
+  -> TwimgUrl.clean(url)             // quita todos los parametros (?tag, ?p, etc. Si no, CDN responde 403)
   -> ResolvedVideo(downloadUrl, thumbnailUrl, width, height, bitrate)
   -> HEAD downloadUrl -> etiqueta "Aprox X.X MB"
   -> DownloadManager.enqueue -> Movies/NovaDX/x_<id>.mp4
@@ -275,7 +276,7 @@ python tool/apk_server.py
 
 - Sin API keys en cliente; extractor público vía HTTPS.
 - `User-Agent: downloader_x/1.0` fijo en `GET` y `HEAD` de Dart; en `DownloadManager` se envía User-Agent de navegador móvil + `Referer: https://x.com/`.
-- Las URLs de descarga pasan por `TwimgUrl.clean()` (sin `tag`) tanto en el resolver como en los downloaders.
+- Las URLs de descarga pasan por `TwimgUrl.clean()` (sin ningún parámetro de consulta) tanto en el resolver como en los downloaders.
 - Firma: `storeFile`, `storePassword`, `keyAlias`, `keyPassword` solo en `android/key.properties` local.
 - Ignorados: `/build/`, `android/key.properties`, `**/*.jks`, `**/*.keystore`, `**/*.p12`, `**/*.pepk`, `app.*.symbols`, `app.*.map.json`.
 
@@ -283,9 +284,9 @@ python tool/apk_server.py
 
 ## Troubleshooting
 
-- **No resuelve**: verifica formato `.../status/<solo-dígitos>`. Los links `x.com/i/status` o con query rara no matchean el regex.
+- **No resuelve**: verifica formato `.../status/<solo-dígitos>`. Los links `x.com/i/status` o con formato inválido no matchean el regex. Los parámetros normales (`?p=...`, `?s=...`) se limpian automáticamente.
 - **404 del extractor**: post eliminado/privado o `api.fxtwitter.com` caído; reintenta.
-- **La descarga falla con 403 / "Unauthorized"**: X empezó a rechazar los mp4 que llevan `?tag=NN`. La app ya los limpia con `TwimgUrl.clean()`; si vuelve a pasar, revisa que la URL final no incluya `tag`.
+- **La descarga falla con 403 / "Unauthorized"**: X rechaza los mp4 que llevan parámetros (`?tag=NN`, `?p=...`). La app ya los limpia por completo con `TwimgUrl.clean()`; si vuelve a pasar, revisa que la URL final no incluya parámetros de consulta.
 - **El post no resuelve pero el enlace es válido**: `api.fxtwitter.com` puede rate-limitar; espera un momento o prueba otro post.
 - **APK no instala tras activar R8**: deja `isMinifyEnabled=false`, `isShrinkResources=false` (estado actual).
 - **`key.properties` ausente**: el build firma con `debug`; es intencional para pruebas locales.

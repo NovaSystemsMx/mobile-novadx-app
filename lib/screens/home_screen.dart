@@ -79,11 +79,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final match = RegExp(r'https?://\S+').firstMatch(text);
     final url = match?.group(0) ?? '';
     if (url.isNotEmpty &&
-        XVideoResolver.looksLikeXUrl(url) &&
-        _controller.text.trim() != url &&
-        _status != DownloadStatus.downloading &&
-        _status != DownloadStatus.resolving) {
-      _controller.text = url;
+        XVideoResolver.looksLikeXUrl(url)) {
+      final clean = XVideoResolver.cleanUrl(url);
+      if (_controller.text.trim() != clean &&
+          _status != DownloadStatus.downloading &&
+          _status != DownloadStatus.resolving) {
+        _controller.text = clean;
+      }
     }
   }
 
@@ -94,7 +96,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final data = await Clipboard.getData('text/plain');
       final text = data?.text?.trim() ?? '';
       if (text.isNotEmpty && XVideoResolver.looksLikeXUrl(text) && mounted) {
-        _controller.text = text;
+        _controller.text = XVideoResolver.cleanUrl(text);
       }
     } catch (_) {
       // Portapapeles no disponible: no pasa nada.
@@ -106,14 +108,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _debounce?.cancel();
     final text = _controller.text.trim();
     if (!XVideoResolver.looksLikeXUrl(text)) return;
-    if (text == _lastResolvedUrl) return;
+    final clean = XVideoResolver.cleanUrl(text);
+    if (clean != text) {
+      _controller.value = _controller.value.copyWith(
+        text: clean,
+        selection: TextSelection.collapsed(offset: clean.length),
+      );
+    }
+    if (clean == _lastResolvedUrl) return;
     if (_status == DownloadStatus.resolving ||
         _status == DownloadStatus.downloading) {
       return;
     }
     _debounce = Timer(const Duration(milliseconds: 700), () {
       if (!mounted) return;
-      if (_controller.text.trim() != text) return;
+      if (_controller.text.trim() != clean) return;
       _start();
     });
   }
@@ -123,7 +132,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final data = await Clipboard.getData('text/plain');
       final text = data?.text?.trim() ?? '';
       if (text.isEmpty) return;
-      _controller.text = text;
+      final clean = XVideoResolver.cleanUrl(text);
+      _controller.text = clean;
       _focusNode.requestFocus();
       // Arranque inmediato: no depender del debounce del listener,
       // que podia no dispararse tras limpiar y pegar.
@@ -135,11 +145,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   /// Busca el video por detras. Al encontrarlo aparece el boton Descargar.
   Future<void> _start() async {
-    final input = _controller.text.trim();
-    if (input.isEmpty ||
+    final raw = _controller.text.trim();
+    if (raw.isEmpty ||
         _status == DownloadStatus.resolving ||
         _status == DownloadStatus.downloading) {
       return;
+    }
+    final input = XVideoResolver.cleanUrl(raw);
+    if (input != raw) {
+      _controller.value = _controller.value.copyWith(
+        text: input,
+        selection: TextSelection.collapsed(offset: input.length),
+      );
     }
     if (input == _lastResolvedUrl &&
         _status == DownloadStatus.preview &&

@@ -48,6 +48,22 @@ class XVideoResolver {
     return regex.hasMatch(url);
   }
 
+  /// Limpia todos los parametros de consulta (?p=, ?s=, etc.) y fragmentos
+  /// de un enlace de X, dejando la URL canonica del post.
+  static String cleanUrl(String input) {
+    final trimmed = input.trim();
+    if (!looksLikeXUrl(trimmed)) return trimmed;
+    final uri = Uri.tryParse(trimmed);
+    if (uri == null) return trimmed;
+    return Uri(
+      scheme: uri.scheme,
+      userInfo: uri.userInfo.isEmpty ? null : uri.userInfo,
+      host: uri.host,
+      port: uri.hasPort ? uri.port : null,
+      path: uri.path,
+    ).toString();
+  }
+
   /// Extrae el id numerico del status del tweet.
   static String? _extractStatusId(String url) {
     final match = RegExp(r'status\/(\d+)').firstMatch(url);
@@ -57,7 +73,7 @@ class XVideoResolver {
   /// Reescribe cualquier enlace de x.com/twitter.com hacia el host del
   /// servicio de extraccion, preservando la ruta del status.
   Uri _buildApiUri(String rawUrl) {
-    final uri = Uri.parse(rawUrl.trim());
+    final uri = Uri.parse(cleanUrl(rawUrl));
     // api.fxtwitter.com respeta la misma ruta /usuario/status/id
     return Uri(
       scheme: 'https',
@@ -68,17 +84,18 @@ class XVideoResolver {
 
   /// Resuelve el enlace de un tweet a la mejor variante de video disponible.
   Future<ResolvedVideo> resolve(String rawUrl) async {
-    if (!looksLikeXUrl(rawUrl)) {
+    final cleanedUrl = cleanUrl(rawUrl);
+    if (!looksLikeXUrl(cleanedUrl)) {
       throw XResolverException(
         'El enlace no parece un post de X. Debe verse como '
         'https://x.com/usuario/status/123...',
       );
     }
-    if (_extractStatusId(rawUrl) == null) {
+    if (_extractStatusId(cleanedUrl) == null) {
       throw XResolverException('No pude identificar el id del post en el enlace.');
     }
 
-    final apiUri = _buildApiUri(rawUrl);
+    final apiUri = _buildApiUri(cleanedUrl);
 
     http.Response res;
     try {
