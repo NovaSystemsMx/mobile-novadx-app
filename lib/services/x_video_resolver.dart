@@ -38,30 +38,36 @@ class XVideoResolver {
 
   final http.Client _client;
 
-  /// Detecta si un texto luce como un enlace de un tweet.
+  /// Encuentra un enlace de X dentro de un texto y captura el usuario y el
+  /// id del post. Acepta x.com/twitter.com (con o sin `www.`/`mobile.`),
+  /// variantes como `/usuario/status/123/video/1` y `/i/web/status/123`.
+  static final RegExp _xUrlPattern = RegExp(
+    r'(?:https?:\/\/)?(?:www\.|mobile\.)?(?:twitter|x)\.com\/'
+    r'(?:([A-Za-z0-9_]+)|i\/web)\/status\/(\d+)',
+    caseSensitive: false,
+  );
+
+  /// Detecta si un texto contiene un enlace de un tweet.
   static bool looksLikeXUrl(String input) {
-    final url = input.trim();
-    final regex = RegExp(
-      r'^https?:\/\/(www\.)?(twitter|x)\.com\/[^\/]+\/status\/\d+',
-      caseSensitive: false,
-    );
-    return regex.hasMatch(url);
+    return _xUrlPattern.hasMatch(input.trim());
   }
 
-  /// Limpia todos los parametros de consulta (?p=, ?s=, etc.) y fragmentos
-  /// de un enlace de X, dejando la URL canonica del post.
+  /// Limpia un enlace de X dejando solo la URL canonica del post:
+  /// `https://x.com/usuario/status/id`. Descarta parametros de consulta
+  /// (`?a=`, `?s=`, `?t=`...), fragmentos, subrutas como `/video/1` o
+  /// `/photo/1`, y texto que rodee al enlace.
   static String cleanUrl(String input) {
     final trimmed = input.trim();
-    if (!looksLikeXUrl(trimmed)) return trimmed;
-    final uri = Uri.tryParse(trimmed);
-    if (uri == null) return trimmed;
-    return Uri(
-      scheme: uri.scheme,
-      userInfo: uri.userInfo.isEmpty ? null : uri.userInfo,
-      host: uri.host,
-      port: uri.hasPort ? uri.port : null,
-      path: uri.path,
-    ).toString();
+    final match = _xUrlPattern.firstMatch(trimmed);
+    if (match == null) return trimmed;
+
+    final handle = match.group(1) ?? 'i/web';
+    final statusId = match.group(2)!;
+    final host = match.group(0)!.toLowerCase().contains('twitter.com')
+        ? 'twitter.com'
+        : 'x.com';
+
+    return 'https://$host/$handle/status/$statusId';
   }
 
   /// Extrae el id numerico del status del tweet.

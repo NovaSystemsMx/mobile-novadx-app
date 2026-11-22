@@ -52,6 +52,48 @@ void main() {
     );
   });
 
+  test('Quita subrutas como /video/1 y parametros de enlaces compartidos', () {
+    // Caso real: enlace copiado desde la app de X.
+    expect(
+      XVideoResolver.cleanUrl(
+        'https://x.com/chodanarchive/status/2124247665311699211/video/1'
+        '?a=53wy31crWffrTHUdL50&s=19',
+      ),
+      'https://x.com/chodanarchive/status/2124247665311699211',
+    );
+    expect(
+      XVideoResolver.cleanUrl(
+        'https://x.com/user/status/123456789/photo/1',
+      ),
+      'https://x.com/user/status/123456789',
+    );
+    expect(
+      XVideoResolver.cleanUrl(
+        'https://mobile.twitter.com/user/status/123456789/video/1?s=20',
+      ),
+      'https://twitter.com/user/status/123456789',
+    );
+    expect(
+      XVideoResolver.cleanUrl('https://x.com/i/web/status/123456789?s=20'),
+      'https://x.com/i/web/status/123456789',
+    );
+  });
+
+  test('Extrae el enlace de X cuando viene rodeado de texto', () {
+    expect(
+      XVideoResolver.cleanUrl(
+        'Mira este video https://x.com/user/status/123/video/1?s=19 que bueno',
+      ),
+      'https://x.com/user/status/123',
+    );
+    expect(
+      XVideoResolver.looksLikeXUrl(
+        'Mira esto: https://x.com/user/status/123/video/1?s=19',
+      ),
+      isTrue,
+    );
+  });
+
   test('Quita todos los parametros (tag, p, v, etc.) de las URLs de twimg', () {
     const rawTag =
         'https://video.twimg.com/amplify_video/123/vid/avc1/1280x720/a.mp4?tag=29';
