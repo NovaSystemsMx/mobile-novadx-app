@@ -25,7 +25,7 @@
 
 ## Descripción general
 
-NovaDX (`downloader_x`, v`0.2.3+5`) resuelve todos los MP4 de un post de X sin API keys y los descarga en segundo plano aunque salgas de la app.
+NovaDX (`downloader_x`, v`0.2.4+6`) resuelve todos los MP4 de un post de X sin API keys y los descarga en segundo plano aunque salgas de la app.
 
 Capacidades verificadas en código:
 
@@ -172,7 +172,7 @@ keyPassword=*****
 1. Copia un link tipo `https://x.com/usuario/status/123...`.
 2. Abre NovaDX: si el portapapeles trae el link, se autorellena. Con el botón Pegar la búsqueda arranca de inmediato, sin pulsar Enter.
 3. O comparte desde X con **Compartir → NovaDX**.
-4. Espera a que aparezca el preview: con un solo video, la card de siempre (`x_<id>.mp4` + peso estimado vía `HEAD`); con varios, una card por video (`Video 1`, `Video 2`, ...) con la misma distribución: miniatura 16:9, nombre, chips y botones propios. Si el link falla, verás ~2 s de "Buscando..." antes del error.
+4. Espera a que aparezca el preview: con un solo video, la card de siempre (`x_<id>.mp4` + peso estimado vía `HEAD`); con varios, una card por video idéntica a la de uno solo: miniatura 16:9, nombre, chips y botones propios. Si el link falla, verás ~2 s de "Buscando..." antes del error.
 5. Pulsa **Descargar** en el video que quieras o **Descargar todos** para encolarlos de una vez. Android muestra una notificación del sistema por cada descarga, con su progreso. Cada card se puede cancelar o reintentar de forma independiente.
 6. Al terminar: **Abrir** o **Compartir** desde la app o la notificación.
 

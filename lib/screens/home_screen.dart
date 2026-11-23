@@ -666,39 +666,13 @@ class _StateCard extends StatelessWidget {
     }
   }
 
-  /// Card de un video, con la misma distribución tanto si el post trae
-  /// uno como si trae varios. [label] solo se muestra en el segundo caso.
-  Widget _videoCard(_VideoItem item, {String? label}) {
+  /// Card de un video, identica tanto si el post trae uno como si trae varios.
+  Widget _videoCard(_VideoItem item) {
     final downloading = item.status == _ItemStatus.downloading;
     final done = item.status == _ItemStatus.done;
     final error = item.status == _ItemStatus.error;
 
     final children = <Widget>[];
-
-    if (label != null) {
-      children.addAll([
-        Row(
-          children: [
-            Text(
-              label,
-              style: mono(
-                size: 12,
-                color: AppColors.accent,
-                weight: FontWeight.w600,
-              ),
-            ),
-            const Spacer(),
-            if (done)
-              const Icon(
-                Icons.check_circle_rounded,
-                color: AppColors.success,
-                size: 18,
-              ),
-          ],
-        ),
-        const SizedBox(height: 10),
-      ]);
-    }
 
     children.addAll([
       _VideoBanner(url: item.video.thumbnailUrl),
@@ -860,7 +834,7 @@ class _StateCard extends StatelessWidget {
         const SizedBox(height: 12),
         for (var i = 0; i < items.length; i++) ...[
           if (i > 0) const SizedBox(height: 12),
-          _videoCard(items[i], label: 'Video ${i + 1}'),
+          _videoCard(items[i]),
         ],
         const SizedBox(height: 12),
         _card(

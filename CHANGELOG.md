@@ -7,7 +7,19 @@ versiones `MAJOR.MINOR.PATCH+BUILD` (`pubspec.yaml`).
 > [!NOTE]
 > Los cambios en progreso se agrupan bajo `Unreleased`. Al publicar el release,
 > ese encabezado se renombra con la versión correspondiente (por ejemplo
-> `v0.2.3`) y se crea el tag del mismo nombre en GitHub.
+> `v0.2.4`) y se crea el tag del mismo nombre en GitHub.
+
+---
+
+## v0.2.4 - 2026-11-23
+
+### Changed
+
+- Las cards de posts con varios videos ya no muestran la etiqueta `Video 1`,
+  `Video 2`, ...: son idénticas a la card de un solo video. El contador global
+  (`x / N videos guardados`) y los botones **Descargar todos / Cancelar todos**
+  no cambian.
+- Versión del proyecto actualizada a `0.2.4+6` en `pubspec.yaml` y `README.md`.
 
 ---
 
