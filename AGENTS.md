@@ -97,4 +97,7 @@ documento cada vez que se pida publicar una nueva versión.**
 - Última versión publicada: **v0.2.4** (`0.2.4+6`), commit `e44abaf`,
   2026-11-23. Tags publicados: `v0.2.3`, `v0.2.4`.
 - `master` y los tags apuntan al mismo commit; árbol limpio tras la publicación.
-- Rama `fix/video-card-labels` fusionada por fast-forward y conservada localmente.
+- El 2026-11-23 se eliminaron localmente, a petición del usuario, todas las
+  ramas ya fusionadas (`feature/multiple-videos-per-post`,
+  `fix/video-card-labels`, `hotfix/twimg-tag-403-download` y `main`). Solo
+  existe la rama local `master`.
