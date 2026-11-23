@@ -11,7 +11,7 @@ versiones `MAJOR.MINOR.PATCH+BUILD` (`pubspec.yaml`).
 
 ---
 
-## Unreleased
+## v0.2.3 - 2026-11-23
 
 ### Added
 
