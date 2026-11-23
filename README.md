@@ -18,26 +18,28 @@
 10. [Permisos Android](#permisos-android)
 11. [Distribución del APK](#distribución-del-apk)
 12. [Seguridad](#seguridad)
-13. [Troubleshooting](#troubleshooting)
+13. [Changelog](#changelog)
+14. [Troubleshooting](#troubleshooting)
 
 ---
 
 ## Descripción general
 
-NovaDX (`downloader_x`, v`0.2.2+4`) resuelve el MP4 directo de un post de X sin API keys y lo descarga en segundo plano aunque salgas de la app.
+NovaDX (`downloader_x`, v`0.2.3+5`) resuelve todos los MP4 de un post de X sin API keys y los descarga en segundo plano aunque salgas de la app.
 
 Capacidades verificadas en código:
 
 - *Auto-resolve con debounce 700 ms*: al detectar `x.com/.../status/<id>` o `twitter.com/.../status/<id>` inicia la búsqueda sin pulsar nada (`lib/screens/home_screen.dart`).
 - *Pegar dispara búsqueda inmediata*: el botón Pegar llama a `_start()` directo tras poner el texto, sin depender del debounce ni pulsar Enter.
 - *Limpieza de parámetros en URL pegada*: al pegar, autocompletar o compartir un enlace de X, se limpian todos los parámetros de consulta (`?p=`, `?s=`, etc.) y fragmentos para usar la URL canónica del post (`XVideoResolver.cleanUrl()`).
-- *Limpiar resetea la card*: la tachita llama a `_cancelPreview()` (estado `idle`, preview en `null`), así el siguiente link siempre busca de cero.
+- *Limpiar resetea la card*: la tachita llama a `_cancelPreview()` (estado `idle`, `_items` vacío), así el siguiente link siempre busca de cero.
 - *Error con mínimo 2 s de "Buscando..."*: `_quedarBienDelay()` garantiza 2 s de spinner antes de mostrar el error (sin espera extra si la red ya tardó más).
 - *Barras del sistema en negro*: `SystemChrome.setSystemUIOverlayStyle` en `main.dart` (status + navigation en `AppColors.background`, iconos claros, `systemNavigationBarContrastEnforced: false`) para modo oscuro/HyperOS.
 - *Autofill desde portapapeles* y *texto compartido* desde X u otra app (`Intent.ACTION_SEND`, `getSharedText`).
 - *Mejor variante por bitrate*: filtra `content_type` con `mp4` y elige el mayor `bitrate`, con fallback a `video.url`.
+- *Posts con varios videos*: `XVideoResolver.resolveAll()` devuelve **todos** los mp4 del post (X permite hasta 4), con la mejor variante de cada uno. La UI muestra una card completa por video (misma distribución que el caso individual) con su propia descarga y botones globales **Descargar todos** / **Cancelar todos**: las descargas corren en paralelo, cada una con su id de `DownloadManager` y su progreso. `resolve()` queda como atajo al primero.
 - *Limpieza total de parámetros en descarga*: X y extractores agregan parámetros (`?tag=NN`, `?p=...`, etc.) a los mp4 y el CDN responde `403 Unauthorized` o rechaza la URL. `TwimgUrl.clean()` remueve todos los parámetros de consulta antes de descargar (`lib/services/twimg_url.dart`).
-- *Descarga en segundo plano* con `DownloadManager` del sistema, notificación `VISIBILITY_VISIBLE_NOTIFY_COMPLETED`, destino `Movies/NovaDX/<x_<id>.mp4>`.
+- *Descarga en segundo plano* con `DownloadManager` del sistema, notificación `VISIBILITY_VISIBLE_NOTIFY_COMPLETED`, destino `Movies/NovaDX/x_<id>.mp4` (o `x_<id>_<n>.mp4` si el post trae varios videos).
 - *Acciones post-descarga*: abrir con visor, compartir vía `Intent`, cancelar, consultar progreso.
 - *UI estilo terminal*: fondo negro, monoespaciada, logo `NOVADX` con fuente `ArchivoBlack`.
 - *Soporte web/desktop*: descarga vía navegador o disco según plataforma (`saver_web.dart` / `saver_native.dart`).
@@ -55,9 +57,9 @@ mobile-novadx-app/
 │   ├── main.dart                 # SystemUI negro + MaterialApp 'NovaDX', theme oscuro, home: HomeScreen
 │   ├── theme.dart                # Paleta terminal (AppColors), fuente mono, ThemeData dark
 │   ├── screens/
-│   │   └── home_screen.dart      # Input link, debounce, estados idle/resolving/preview/downloading/done/error
+│   │   └── home_screen.dart      # Input link, debounce, estados globales + descarga por video (idle/downloading/done/error)
 │   ├── services/
-│   │   ├── x_video_resolver.dart # looksLikeXUrl(), resolve() vía https://api.fxtwitter.com/<path>
+│   │   ├── x_video_resolver.dart # looksLikeXUrl(), resolveAll()/resolve() vía https://api.fxtwitter.com/<path>
 │   │   ├── twimg_url.dart        # Quita ?tag= de los mp4 de video.twimg.com (evita 403)
 │   │   ├── video_downloader.dart # Descarga http con progreso (uso web/fallback), saveBytes por plataforma
 │   │   ├── gallery_downloader.dart # MethodChannel novadx/gallery: enqueue/query/cancel/open/share
@@ -170,11 +172,11 @@ keyPassword=*****
 1. Copia un link tipo `https://x.com/usuario/status/123...`.
 2. Abre NovaDX: si el portapapeles trae el link, se autorellena. Con el botón Pegar la búsqueda arranca de inmediato, sin pulsar Enter.
 3. O comparte desde X con **Compartir → NovaDX**.
-4. Espera a que aparezca el preview (`x_<id>.mp4` + peso estimado vía `HEAD` `content-length`). Si el link falla, verás ~2 s de "Buscando..." antes del error.
-5. Pulsa **Descargar**: Android muestra notificación del sistema con progreso.
+4. Espera a que aparezca el preview: con un solo video, la card de siempre (`x_<id>.mp4` + peso estimado vía `HEAD`); con varios, una card por video (`Video 1`, `Video 2`, ...) con la misma distribución: miniatura 16:9, nombre, chips y botones propios. Si el link falla, verás ~2 s de "Buscando..." antes del error.
+5. Pulsa **Descargar** en el video que quieras o **Descargar todos** para encolarlos de una vez. Android muestra una notificación del sistema por cada descarga, con su progreso. Cada card se puede cancelar o reintentar de forma independiente.
 6. Al terminar: **Abrir** o **Compartir** desde la app o la notificación.
 
-Nombre de archivo: `x_<statusId>.mp4`. Si existe, `DownloadManager` lo reemplaza (borra previo + `scanFile`).
+Nombre de archivo: `x_<statusId>.mp4` para un solo video; `x_<statusId>_1.mp4`, `x_<statusId>_2.mp4`, ... cuando el post trae varios. Si existe, `DownloadManager` lo reemplaza (borra previo + `scanFile`).
 
 ---
 
@@ -184,11 +186,11 @@ Nombre de archivo: `x_<statusId>.mp4`. Si existe, `DownloadManager` lo reemplaza
 input link
   -> XVideoResolver.looksLikeXUrl()  // ^https?://(www.)?(twitter|x).com/.../status/\d+
   -> GET https://api.fxtwitter.com/<usuario>/status/<id>  (timeout 20s, UA: downloader_x/1.0)
-  -> tweet.media.videos[0].variants  // filtra mp4, max bitrate
+  -> tweet.media.videos[*].variants  // por CADA video: filtra mp4, max bitrate
   -> TwimgUrl.clean(url)             // quita todos los parametros (?tag, ?p, etc. Si no, CDN responde 403)
-  -> ResolvedVideo(downloadUrl, thumbnailUrl, width, height, bitrate)
-  -> HEAD downloadUrl -> etiqueta "Aprox X.X MB"
-  -> DownloadManager.enqueue -> Movies/NovaDX/x_<id>.mp4
+  -> List<ResolvedVideo>(downloadUrl, index, thumbnailUrl, width, height, bitrate)
+  -> HEAD de todas las URLs en paralelo -> etiqueta "Aprox X.X MB" por video
+  -> DownloadManager.enqueue por video -> Movies/NovaDX/x_<id>_<n>.mp4
 ```
 
 Ejemplo real:
@@ -218,7 +220,7 @@ curl https://api.fxtwitter.com/nasa/status/1234567890
 }
 ```
 
-La app elige `720.mp4` (mayor bitrate).
+La app elige `720.mp4` (mayor bitrate) para cada video del array. Si `videos` trae 4 entradas, aparecen las 4. Las entradas sin URL mp4 válida se ignoran; si ninguna sirve, se muestra `No encontre una URL de video descargable.`.
 
 Errores conocidos (mensajes en español en UI):
 
@@ -279,6 +281,12 @@ python tool/apk_server.py
 - Las URLs de descarga pasan por `TwimgUrl.clean()` (sin ningún parámetro de consulta) tanto en el resolver como en los downloaders.
 - Firma: `storeFile`, `storePassword`, `keyAlias`, `keyPassword` solo en `android/key.properties` local.
 - Ignorados: `/build/`, `android/key.properties`, `**/*.jks`, `**/*.keystore`, `**/*.p12`, `**/*.pepk`, `app.*.symbols`, `app.*.map.json`.
+
+---
+
+## Changelog
+
+El historial de cambios vive en [`CHANGELOG.md`](CHANGELOG.md), con los cambios pendientes bajo `Unreleased` y las versiones publicadas identificadas por tag.
 
 ---
 

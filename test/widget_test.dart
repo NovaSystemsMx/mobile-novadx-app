@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 
 import 'package:downloader_x/main.dart';
 import 'package:downloader_x/services/twimg_url.dart';
@@ -125,5 +127,65 @@ void main() {
   test('Deja intacta una URL de twimg sin parametros', () {
     const clean = 'https://video.twimg.com/amplify_video/1/vid/a.mp4';
     expect(TwimgUrl.clean(clean), clean);
+  });
+
+  test('Resuelve todos los videos de un post, no solo el primero', () async {
+    const body = '''
+    {
+      "tweet": {
+        "media": {
+          "videos": [
+            {
+              "url": "https://video.twimg.com/a.mp4?tag=1",
+              "thumbnail_url": "https://pbs.twimg.com/1.jpg",
+              "width": 1280,
+              "height": 720,
+              "variants": [
+                {"content_type": "video/mp4", "bitrate": 832000,
+                 "url": "https://video.twimg.com/a480.mp4?tag=1"},
+                {"content_type": "video/mp4", "bitrate": 2176000,
+                 "url": "https://video.twimg.com/a720.mp4?tag=1"},
+                {"content_type": "application/x-mpegURL",
+                 "url": "https://video.twimg.com/a.m3u8"}
+              ]
+            },
+            {
+              "url": "https://video.twimg.com/b.mp4",
+              "thumbnail_url": "https://pbs.twimg.com/2.jpg",
+              "width": 640,
+              "height": 360,
+              "variants": [
+                {"content_type": "video/mp4", "bitrate": 550000,
+                 "url": "https://video.twimg.com/b360.mp4"}
+              ]
+            },
+            {}
+          ]
+        }
+      }
+    }
+    ''';
+    final resolver = XVideoResolver(
+      client: MockClient((request) async => http.Response(body, 200)),
+    );
+
+    final videos =
+        await resolver.resolveAll('https://x.com/user/status/123?s=20');
+
+    expect(videos, hasLength(2));
+    expect(videos.map((v) => v.index), [0, 1]);
+    expect(
+      videos.map((v) => v.downloadUrl),
+      [
+        'https://video.twimg.com/a720.mp4',
+        'https://video.twimg.com/b360.mp4',
+      ],
+    );
+    expect(videos.first.bitrate, 2176000);
+    expect(videos.first.thumbnailUrl, 'https://pbs.twimg.com/1.jpg');
+
+    // El metodo antiguo sigue devolviendo el primero para compatibilidad.
+    final first = await resolver.resolve('https://x.com/user/status/123');
+    expect(first.downloadUrl, videos.first.downloadUrl);
   });
 }

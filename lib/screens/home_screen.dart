@@ -12,6 +12,23 @@ import '../widgets/block_logo.dart';
 
 enum DownloadStatus { idle, resolving, preview, downloading, done, error }
 
+enum _ItemStatus { idle, downloading, done, error }
+
+/// Estado de descarga de uno de los videos del post.
+class _VideoItem {
+  _VideoItem({required this.video, required this.fileName})
+      : status = _ItemStatus.idle;
+
+  final ResolvedVideo video;
+  final String fileName;
+  String? sizeLabel;
+  _ItemStatus status;
+  double? progress;
+  bool cancelRequested = false;
+  String? error;
+  String lastFileName = '';
+}
+
 /// Pantalla principal: pega el link, se busca solo y aparece Descargar.
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -27,17 +44,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final _downloader = VideoDownloader();
 
   DownloadStatus _status = DownloadStatus.idle;
-  double? _progress;
   String _message = '';
 
-  ResolvedVideo? _preview;
-  String _fileName = '';
-  String? _sizeLabel;
+  /// Todos los videos del post; uno solo cuando el post trae un único mp4.
+  List<_VideoItem> _items = [];
   String _lastResolvedUrl = '';
 
   Timer? _debounce;
-  bool _cancelRequested = false;
-  String _lastFileName = '';
 
   @override
   void initState() {
@@ -143,7 +156,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  /// Busca el video por detras. Al encontrarlo aparece el boton Descargar.
+  /// Busca todos los videos del post por detras. Al encontrarlos aparece
+  /// la lista con un boton Descargar por video (y uno para descargar todos).
   Future<void> _start() async {
     final raw = _controller.text.trim();
     if (raw.isEmpty ||
@@ -160,16 +174,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
     if (input == _lastResolvedUrl &&
         _status == DownloadStatus.preview &&
-        _preview != null) {
+        _items.isNotEmpty) {
       return;
     }
 
     if (!XVideoResolver.looksLikeXUrl(input)) {
       setState(() {
         _status = DownloadStatus.resolving;
-        _progress = null;
         _message = '';
-        _preview = null;
+        _items = [];
       });
       // Pequeña espera para que se alcance a ver el "Buscando...".
       await Future.delayed(const Duration(seconds: 2));
@@ -184,25 +197,43 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final stopwatch = Stopwatch()..start();
     setState(() {
       _status = DownloadStatus.resolving;
-      _progress = null;
       _message = '';
-      _preview = null;
+      _items = [];
     });
 
     try {
-      final resolved = await _resolver.resolve(input);
+      final resolved = await _resolver.resolveAll(input);
       final statusId =
           RegExp(r'status\/(\d+)').firstMatch(input)?.group(1) ?? 'video';
-      final fileName = 'x_$statusId.mp4';
-      final size = await GalleryDownloader.estimateSizeLabel(
-        resolved.downloadUrl,
+      final items = resolved
+          .map(
+            (v) => _VideoItem(
+              video: v,
+              // Un solo video conserva el nombre historico x_<id>.mp4.
+              // Con varios: x_<id>_1.mp4, x_<id>_2.mp4, ...
+              fileName: resolved.length == 1
+                  ? 'x_$statusId.mp4'
+                  : 'x_${statusId}_${v.index + 1}.mp4',
+            ),
+          )
+          .toList();
+
+      // HEAD de todos en paralelo: no queremos esperar 4 veces de a 8 s.
+      final sizes = await Future.wait(
+        items
+            .map((item) => GalleryDownloader.estimateSizeLabel(
+                  item.video.downloadUrl,
+                ))
+            .toList(),
       );
+      for (var i = 0; i < items.length; i++) {
+        items[i].sizeLabel = sizes[i];
+      }
+
       if (!mounted) return;
       setState(() {
         _status = DownloadStatus.preview;
-        _preview = resolved;
-        _fileName = fileName;
-        _sizeLabel = size;
+        _items = items;
         _lastResolvedUrl = input;
       });
     } on XResolverException catch (e) {
@@ -231,43 +262,33 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (elapsed < min) await Future.delayed(min - elapsed);
   }
 
-  /// Descarga el video ya localizado.
-  Future<void> _download() async {
-    final video = _preview;
-    if (video == null || _status == DownloadStatus.downloading) return;
-
+  /// Descarga un video. Varios pueden estar en marcha a la vez: cada uno
+  /// tiene su propio id de DownloadManager y su bucle de progreso.
+  Future<void> _downloadItem(_VideoItem item) async {
+    if (item.status == _ItemStatus.downloading ||
+        item.status == _ItemStatus.done) {
+      return;
+    }
     setState(() {
+      item.status = _ItemStatus.downloading;
+      item.progress = null;
+      item.error = null;
+      item.cancelRequested = false;
       _status = DownloadStatus.downloading;
-      _progress = null;
-      _cancelRequested = false;
     });
 
     if (!Platform.isAndroid) {
       try {
         await _downloader.download(
-          video.downloadUrl,
-          fileName: _fileName,
+          item.video.downloadUrl,
+          fileName: item.fileName,
           onProgress: (p) {
-            if (mounted) setState(() => _progress = p);
+            if (mounted) setState(() => item.progress = p);
           },
         );
-        if (!mounted) return;
-        HapticFeedback.mediumImpact();
-        setState(() {
-          _status = DownloadStatus.done;
-          _progress = 1.0;
-          _lastFileName = _fileName;
-        });
-        _controller.clear();
-        _lastResolvedUrl = '';
-        _focusNode.requestFocus();
+        _finishItem(item, item.fileName);
       } catch (_) {
-        if (!mounted) return;
-        HapticFeedback.lightImpact();
-        setState(() {
-          _status = DownloadStatus.error;
-          _message = 'La descarga fallo.';
-        });
+        _failItem(item);
       }
       return;
     }
@@ -275,30 +296,29 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     int id;
     try {
       id = await GalleryDownloader.enqueue(
-        url: video.downloadUrl,
-        fileName: _fileName,
+        url: item.video.downloadUrl,
+        fileName: item.fileName,
       );
     } catch (_) {
-      if (!mounted) return;
-      setState(() {
-        _status = DownloadStatus.error;
-        _message = 'No pude iniciar la descarga.';
-      });
+      _failItem(item, 'No pude iniciar la descarga.');
       return;
     }
 
-    while (mounted) {
-      if (_cancelRequested) {
+    while (mounted && item.status == _ItemStatus.downloading) {
+      if (item.cancelRequested) {
         await GalleryDownloader.cancel(id);
+        if (!mounted) return;
         setState(() {
-          _status = DownloadStatus.idle;
-          _progress = null;
-          _preview = null;
-          _lastResolvedUrl = '';
+          item.status = _ItemStatus.idle;
+          item.progress = null;
+          item.cancelRequested = false;
+          _syncGlobalStatus();
         });
         return;
       }
       await Future.delayed(const Duration(milliseconds: 500));
+      if (!mounted) return;
+
       DownloadProgress info;
       try {
         info = await GalleryDownloader.query(id);
@@ -306,56 +326,91 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         continue;
       }
       if (info.status == DownloadProgress.successful) {
-        HapticFeedback.mediumImpact();
-        setState(() {
-          _status = DownloadStatus.done;
-          _progress = 1.0;
-          _lastFileName =
-              info.fileName.isNotEmpty ? info.fileName : _fileName;
-        });
-        _controller.clear();
-        _lastResolvedUrl = '';
-        _focusNode.requestFocus();
+        _finishItem(item, info.fileName);
         return;
       }
       if (info.status == DownloadProgress.failed) {
-        HapticFeedback.lightImpact();
-        setState(() {
-          _status = DownloadStatus.error;
-          _message = 'La descarga fallo.';
-        });
+        _failItem(item);
         return;
       }
       setState(() {
-        _progress = info.total > 0 ? info.received / info.total : null;
+        item.progress = info.total > 0 ? info.received / info.total : null;
       });
     }
   }
 
-  void _cancelDownload() {
-    if (_status == DownloadStatus.downloading) {
-      setState(() => _cancelRequested = true);
+  /// Encola los videos que falten. Las llamadas async se lanzan sin await
+  /// para que corran en paralelo; el guard de [_downloadItem] evita duplicar.
+  void _downloadAll() {
+    for (final item in _items) {
+      if (item.status != _ItemStatus.done &&
+          item.status != _ItemStatus.downloading) {
+        unawaited(_downloadItem(item));
+      }
+    }
+  }
+
+  void _cancelItem(_VideoItem item) {
+    if (item.status != _ItemStatus.downloading) return;
+    setState(() => item.cancelRequested = true);
+  }
+
+  void _cancelAll() {
+    setState(() {
+      for (final item in _items) {
+        if (item.status == _ItemStatus.downloading) {
+          item.cancelRequested = true;
+        }
+      }
+    });
+  }
+
+  void _finishItem(_VideoItem item, String fileName) {
+    if (!mounted) return;
+    HapticFeedback.mediumImpact();
+    setState(() {
+      item.status = _ItemStatus.done;
+      item.progress = 1.0;
+      item.lastFileName =
+          fileName.isNotEmpty ? fileName : item.fileName;
+      _syncGlobalStatus();
+    });
+  }
+
+  void _failItem(_VideoItem item, [String message = 'La descarga fallo.']) {
+    if (!mounted) return;
+    HapticFeedback.lightImpact();
+    setState(() {
+      item.status = _ItemStatus.error;
+      item.error = message;
+      item.progress = null;
+      _syncGlobalStatus();
+    });
+  }
+
+  /// El estado global solo organiza la card: termina cuando todos los
+  /// videos terminaron, o vuelve a preview si no queda ninguno en marcha.
+  void _syncGlobalStatus() {
+    if (_items.isNotEmpty && _items.every((i) => i.status == _ItemStatus.done)) {
+      _status = DownloadStatus.done;
+    } else if (_items.any((i) => i.status == _ItemStatus.downloading)) {
+      _status = DownloadStatus.downloading;
+    } else {
+      _status = DownloadStatus.preview;
     }
   }
 
   void _cancelPreview() {
     setState(() {
       _status = DownloadStatus.idle;
-      _preview = null;
-      _progress = null;
+      _items = [];
       _message = '';
       _lastResolvedUrl = '';
     });
   }
 
   void _downloadAnother() {
-    setState(() {
-      _status = DownloadStatus.idle;
-      _preview = null;
-      _progress = null;
-      _message = '';
-      _lastResolvedUrl = '';
-    });
+    _cancelPreview();
     _controller.clear();
     _focusNode.requestFocus();
   }
@@ -402,14 +457,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   const SizedBox(height: 16),
                   _StateCard(
                     status: _status,
-                    progress: _progress,
                     message: _message,
-                    preview: _preview,
-                    fileName: _fileName,
-                    sizeLabel: _sizeLabel,
-                    lastFileName: _lastFileName,
-                    onDownload: _download,
-                    onCancelDownload: _cancelDownload,
+                    items: _items,
+                    onDownloadItem: _downloadItem,
+                    onCancelItem: _cancelItem,
+                    onDownloadAll: _downloadAll,
+                    onCancelAll: _cancelAll,
                     onCancelPreview: _cancelPreview,
                     onRetry: _start,
                     onAnother: _downloadAnother,
@@ -522,28 +575,24 @@ class _LinkCard extends StatelessWidget {
 class _StateCard extends StatelessWidget {
   const _StateCard({
     required this.status,
-    required this.progress,
     required this.message,
-    required this.preview,
-    required this.fileName,
-    required this.sizeLabel,
-    required this.lastFileName,
-    required this.onDownload,
-    required this.onCancelDownload,
+    required this.items,
+    required this.onDownloadItem,
+    required this.onCancelItem,
+    required this.onDownloadAll,
+    required this.onCancelAll,
     required this.onCancelPreview,
     required this.onRetry,
     required this.onAnother,
   });
 
   final DownloadStatus status;
-  final double? progress;
   final String message;
-  final ResolvedVideo? preview;
-  final String fileName;
-  final String? sizeLabel;
-  final String lastFileName;
-  final VoidCallback onDownload;
-  final VoidCallback onCancelDownload;
+  final List<_VideoItem> items;
+  final void Function(_VideoItem item) onDownloadItem;
+  final void Function(_VideoItem item) onCancelItem;
+  final VoidCallback onDownloadAll;
+  final VoidCallback onCancelAll;
   final VoidCallback onCancelPreview;
   final VoidCallback onRetry;
   final VoidCallback onAnother;
@@ -573,118 +622,6 @@ class _StateCard extends StatelessWidget {
                 ),
               ],
             ),
-          ],
-        );
-      case DownloadStatus.preview:
-        return _card(
-          children: [
-            _VideoBanner(url: preview?.thumbnailUrl),
-            const SizedBox(height: 14),
-            Text(
-              fileName,
-              style: mono(size: 12, color: AppColors.textDim),
-            ),
-            const SizedBox(height: 8),
-            _MetaChips(
-              resolution: _resolutionLabel(),
-              size: sizeLabel,
-            ),
-            const SizedBox(height: 14),
-            Row(
-              children: [
-                Expanded(
-                  child: _ghostButton('Cancelar', onCancelPreview),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  flex: 2,
-                  child: _solidButton('Descargar', onDownload),
-                ),
-              ],
-            ),
-          ],
-        );
-      case DownloadStatus.downloading:
-        return _card(
-          children: [
-            _VideoBanner(url: preview?.thumbnailUrl),
-            const SizedBox(height: 14),
-            Text(
-              fileName,
-              style: mono(size: 12, color: AppColors.textDim),
-            ),
-            const SizedBox(height: 8),
-            _MetaChips(
-              resolution: _resolutionLabel(),
-              size: sizeLabel,
-            ),
-            const SizedBox(height: 14),
-            Text(
-              progress == null
-                  ? 'Descargando...'
-                  : '${(progress! * 100).toStringAsFixed(0)} %',
-              style: const TextStyle(
-                fontSize: 28,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 10),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(6),
-              child: LinearProgressIndicator(
-                value: progress,
-                minHeight: 6,
-                backgroundColor: AppColors.border,
-                valueColor: const AlwaysStoppedAnimation(AppColors.accent),
-              ),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'Sigue en segundo plano.',
-              style: TextStyle(
-                fontSize: 12,
-                color: AppColors.textDim,
-              ),
-            ),
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton(
-                onPressed: onCancelDownload,
-                child: const Text('Cancelar'),
-              ),
-            ),
-          ],
-        );
-      case DownloadStatus.done:
-        return _card(
-          children: [
-            _VideoBanner(url: preview?.thumbnailUrl),
-            const SizedBox(height: 14),
-            const Row(
-              children: [
-                Icon(
-                  Icons.check_circle_rounded,
-                  color: AppColors.success,
-                ),
-                SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    'Video guardado',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            Text(
-              lastFileName,
-              style: mono(size: 12, color: AppColors.textDim),
-            ),
-            const SizedBox(height: 14),
-            _ghostButton('Descargar otro', onAnother),
           ],
         );
       case DownloadStatus.error:
@@ -720,13 +657,234 @@ class _StateCard extends StatelessWidget {
             _solidButton('Reintentar', onRetry),
           ],
         );
+      case DownloadStatus.preview:
+      case DownloadStatus.downloading:
+      case DownloadStatus.done:
+        if (items.isEmpty) return const SizedBox.shrink();
+        if (items.length == 1) return _videoCard(items.first);
+        return _videoList();
     }
   }
 
-  String? _resolutionLabel() {
-    final v = preview;
-    if (v?.width != null && v?.height != null) {
-      return '${v!.width} x ${v.height}';
+  /// Card de un video, con la misma distribución tanto si el post trae
+  /// uno como si trae varios. [label] solo se muestra en el segundo caso.
+  Widget _videoCard(_VideoItem item, {String? label}) {
+    final downloading = item.status == _ItemStatus.downloading;
+    final done = item.status == _ItemStatus.done;
+    final error = item.status == _ItemStatus.error;
+
+    final children = <Widget>[];
+
+    if (label != null) {
+      children.addAll([
+        Row(
+          children: [
+            Text(
+              label,
+              style: mono(
+                size: 12,
+                color: AppColors.accent,
+                weight: FontWeight.w600,
+              ),
+            ),
+            const Spacer(),
+            if (done)
+              const Icon(
+                Icons.check_circle_rounded,
+                color: AppColors.success,
+                size: 18,
+              ),
+          ],
+        ),
+        const SizedBox(height: 10),
+      ]);
+    }
+
+    children.addAll([
+      _VideoBanner(url: item.video.thumbnailUrl),
+      const SizedBox(height: 14),
+      Text(
+        done && item.lastFileName.isNotEmpty
+            ? item.lastFileName
+            : item.fileName,
+        style: mono(size: 12, color: AppColors.textDim),
+      ),
+    ]);
+
+    if (!done) {
+      children.addAll([
+        const SizedBox(height: 8),
+        _MetaChips(
+          resolution: _resolutionLabel(item.video),
+          size: item.sizeLabel,
+        ),
+      ]);
+    }
+
+    if (error) {
+      children.addAll([
+        const SizedBox(height: 10),
+        Text(
+          item.error ?? 'La descarga fallo.',
+          style: const TextStyle(fontSize: 13, color: AppColors.error),
+        ),
+      ]);
+    }
+
+    if (downloading) {
+      children.addAll([
+        const SizedBox(height: 14),
+        Text(
+          item.progress == null
+              ? 'Descargando...'
+              : '${(item.progress! * 100).toStringAsFixed(0)} %',
+          style: const TextStyle(
+            fontSize: 28,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 10),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(6),
+          child: LinearProgressIndicator(
+            value: item.progress,
+            minHeight: 6,
+            backgroundColor: AppColors.border,
+            valueColor: const AlwaysStoppedAnimation(AppColors.accent),
+          ),
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'Sigue en segundo plano.',
+          style: TextStyle(
+            fontSize: 12,
+            color: AppColors.textDim,
+          ),
+        ),
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton(
+            onPressed: () => onCancelItem(item),
+            child: const Text('Cancelar'),
+          ),
+        ),
+      ]);
+    } else if (done) {
+      children.addAll([
+        const SizedBox(height: 14),
+        const Row(
+          children: [
+            Icon(
+              Icons.check_circle_rounded,
+              color: AppColors.success,
+            ),
+            SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Video guardado',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 14),
+        _ghostButton('Descargar otro', onAnother),
+      ]);
+    } else {
+      children.addAll([
+        const SizedBox(height: 14),
+        Row(
+          children: [
+            Expanded(
+              child: _ghostButton('Cancelar', onCancelPreview),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              flex: 2,
+              child: _solidButton(
+                error ? 'Reintentar' : 'Descargar',
+                () => onDownloadItem(item),
+              ),
+            ),
+          ],
+        ),
+      ]);
+    }
+
+    return _card(children: children);
+  }
+
+  /// Varios videos: una card completa por video mas las acciones globales.
+  Widget _videoList() {
+    final doneCount =
+        items.where((i) => i.status == _ItemStatus.done).length;
+    final anyDownloading =
+        items.any((i) => i.status == _ItemStatus.downloading);
+    final allDone = doneCount == items.length;
+    final remaining = items.length - doneCount;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _card(
+          children: [
+            Row(
+              children: [
+                const Icon(
+                  Icons.video_library_rounded,
+                  color: AppColors.accent,
+                  size: 20,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    '$doneCount / ${items.length} videos guardados',
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'Descarga los que quieras o todos a la vez.',
+              style: TextStyle(fontSize: 12, color: AppColors.textDim),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        for (var i = 0; i < items.length; i++) ...[
+          if (i > 0) const SizedBox(height: 12),
+          _videoCard(items[i], label: 'Video ${i + 1}'),
+        ],
+        const SizedBox(height: 12),
+        _card(
+          children: [
+            if (allDone)
+              _ghostButton('Descargar otro', onAnother)
+            else if (anyDownloading)
+              _ghostButton('Cancelar todos', onCancelAll)
+            else
+              _solidButton(
+                remaining == items.length
+                    ? 'Descargar todos (${items.length})'
+                    : 'Descargar restantes ($remaining)',
+                onDownloadAll,
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  String? _resolutionLabel(ResolvedVideo video) {
+    if (video.width != null && video.height != null) {
+      return '${video.width} x ${video.height}';
     }
     return null;
   }

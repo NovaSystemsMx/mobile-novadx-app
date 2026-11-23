@@ -7,6 +7,7 @@ import 'twimg_url.dart';
 class ResolvedVideo {
   const ResolvedVideo({
     required this.downloadUrl,
+    this.index = 0,
     this.thumbnailUrl,
     this.width,
     this.height,
@@ -14,6 +15,10 @@ class ResolvedVideo {
   });
 
   final String downloadUrl;
+
+  /// Posición del video dentro del post (0-based). Un post puede traer
+  /// hasta 4 videos; el índice se usa para nombrar los archivos.
+  final int index;
   final String? thumbnailUrl;
   final int? width;
   final int? height;
@@ -88,8 +93,34 @@ class XVideoResolver {
     );
   }
 
-  /// Resuelve el enlace de un tweet a la mejor variante de video disponible.
-  Future<ResolvedVideo> resolve(String rawUrl) async {
+  /// Mejor variante mp4 de un video, medida por bitrate.
+  ({String url, int? bitrate})? _bestMp4Variant(Map<String, dynamic> video) {
+    final variants = video['variants'] as List<dynamic>?;
+    Map<String, dynamic>? best;
+    var bestBitrate = -1;
+
+    if (variants != null) {
+      for (final v in variants) {
+        if (v is! Map<String, dynamic>) continue;
+        final type = (v['content_type'] ?? '').toString();
+        if (!type.contains('mp4')) continue;
+        final br = (v['bitrate'] as num?)?.toInt() ?? 0;
+        if (best == null || br > bestBitrate) {
+          best = v;
+          bestBitrate = br;
+        }
+      }
+    }
+
+    // Fallback al url directo que a veces trae el objeto video.
+    final url = (best?['url'] as String?) ?? (video['url'] as String?);
+    if (url == null || url.isEmpty) return null;
+    return (url: url, bitrate: bestBitrate > 0 ? bestBitrate : null);
+  }
+
+  /// Resuelve **todos** los videos de un post (X permite hasta 4),
+  /// eligiendo la mejor variante mp4 de cada uno.
+  Future<List<ResolvedVideo>> resolveAll(String rawUrl) async {
     final cleanedUrl = cleanUrl(rawUrl);
     if (!looksLikeXUrl(cleanedUrl)) {
       throw XResolverException(
@@ -109,7 +140,7 @@ class XVideoResolver {
         apiUri,
         headers: {'User-Agent': 'downloader_x/1.0'},
       ).timeout(const Duration(seconds: 20));
-    } catch (e) {
+    } catch (_) {
       throw XResolverException('No pude conectar con el servicio de extraccion.');
     }
 
@@ -141,40 +172,36 @@ class XVideoResolver {
       throw XResolverException('Este post no contiene ningun video.');
     }
 
-    // Tomamos el primer video y elegimos la mejor variante por bitrate.
-    final video = videos.first as Map<String, dynamic>;
-    final variants = video['variants'] as List<dynamic>?;
+    final resolved = <ResolvedVideo>[];
+    for (var i = 0; i < videos.length; i++) {
+      final video = videos[i];
+      if (video is! Map<String, dynamic>) continue;
+      final best = _bestMp4Variant(video);
+      if (best == null) continue;
 
-    String? bestUrl;
-    int bestBitrate = -1;
-
-    if (variants != null && variants.isNotEmpty) {
-      for (final v in variants.cast<Map<String, dynamic>>()) {
-        final type = (v['content_type'] ?? '').toString();
-        if (!type.contains('mp4')) continue;
-        final br = (v['bitrate'] as num?)?.toInt() ?? 0;
-        if (br > bestBitrate) {
-          bestBitrate = br;
-          bestUrl = v['url'] as String?;
-        }
-      }
+      resolved.add(
+        ResolvedVideo(
+          index: i,
+          // El CDN de X devuelve 403 si el mp4 lleva el parametro `tag`.
+          downloadUrl: TwimgUrl.clean(best.url),
+          thumbnailUrl: video['thumbnail_url'] as String?,
+          width: (video['width'] as num?)?.toInt(),
+          height: (video['height'] as num?)?.toInt(),
+          bitrate: best.bitrate,
+        ),
+      );
     }
 
-    // Fallback al url directo que a veces trae el objeto video.
-    bestUrl ??= video['url'] as String?;
-
-    if (bestUrl == null || bestUrl.isEmpty) {
+    if (resolved.isEmpty) {
       throw XResolverException('No encontre una URL de video descargable.');
     }
+    return resolved;
+  }
 
-    return ResolvedVideo(
-      // El CDN de X devuelve 403 si el mp4 lleva el parametro `tag`.
-      downloadUrl: TwimgUrl.clean(bestUrl),
-      thumbnailUrl: video['thumbnail_url'] as String?,
-      width: (video['width'] as num?)?.toInt(),
-      height: (video['height'] as num?)?.toInt(),
-      bitrate: bestBitrate > 0 ? bestBitrate : null,
-    );
+  /// Compatibilidad con llamadas de un solo video: devuelve el primero.
+  Future<ResolvedVideo> resolve(String rawUrl) async {
+    final videos = await resolveAll(rawUrl);
+    return videos.first;
   }
 
   void dispose() => _client.close();
